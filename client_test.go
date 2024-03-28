@@ -3,6 +3,8 @@ package simplerpc
 import (
 	"context"
 	"net"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -34,15 +36,6 @@ func (b Bar) Timeout(argv int, reply *int) error {
 	return nil
 }
 
-func startServer(addr chan string) {
-	var b Bar
-	_ = Register(&b)
-	// pick a free port
-	l, _ := net.Listen("tcp", ":0")
-	addr <- l.Addr().String()
-	Accept(l)
-}
-
 func TestClient_Call(t *testing.T) {
 	t.Parallel()
 	addrCh := make(chan string)
@@ -65,4 +58,26 @@ func TestClient_Call(t *testing.T) {
 		err := client.Call(context.Background(), "Bar.Timeout", 1, &reply)
 		_assert(err != nil && strings.Contains(err.Error(), "handle timeout"), "expect a timeout error")
 	})
+}
+
+func TestXDial(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		ch := make(chan int)
+		addr := "/tmp/geerpc.sock"
+		go func() {
+			_ = os.Remove(addr)
+			l, err := net.Listen("unix", addr)
+			if err != nil {
+				ch <- 2
+			}
+			ch <- 1
+			Accept(l)
+		}()
+
+		if <-ch == 2 {
+			t.Fatal("failed to listen unix socket")
+		}
+		_, err := XDial("unix@" + addr)
+		_assert(err == nil, "failed to connect unix socket")
+	}
 }
